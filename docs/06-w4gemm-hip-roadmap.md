@@ -131,3 +131,22 @@ prefill 4379 tok/s 不变（M=2048 回落 fork）。单路步长 20.04 → 12.48
 - KV fp8→fp4+旋转：长上下文选项（16k+ 回本，池再 ×2）
 
 **决策（用户拍板）：W3 等降精度项目暂不开工**，当前 80.1 t/s 收官。
+
+## Prefill 真凶画像（09-15，`profiling/prof_prefill.txt`）
+
+用 uptime/慢步触发的 prefill 专用 profiler（`fp8kv_prof_prefill.py`，v4：该引擎空闲时**不 tick step**，
+启动热身/捕获全绕过 step() 直接调模型——所以钩子装好后第一个 >0.2s 的步必是真实请求的 prefill chunk，
+无需任何武装）。抓到的 chunk（~850 token，带 profiler CPU 开销墙 666ms）：
+
+| GPU 项 | 时间 | 占 GPU | 判读 |
+|---|---|---|---|
+| **stock Triton unified prefill attention**（32 层 × **1.53ms/层**） | 48.8ms | **56%** | **距带宽/算力下限几十倍——真凶**；decode 战役只写了 decode kernel，prefill 走的一直是 stock 路径 |
+| fork W4A8 GEMM（128 个 `radiance_mxfp4_fp8_gemm_folded`） | 34.3ms | 39% | 折算 **~346 TFLOPS ≈ fp8 WMMA 峰值（325）——GEMM 无辜且优秀** |
+| fp8 激活量化 + silu/norm/KV写/采样 | ~4.5ms | 5% | 边角料 |
+
+另一维度：chunk 墙钟与 GPU busy 差约一半（无 profiler 时 ~468ms 墙 vs ~250ms GPU）——**CPU/引擎侧
+（调度、launch 间隙、单次 89ms 的 hipDeviceSynchronize）吃掉了另一半**。
+
+**修正结论**：prefill 4379 tok/s（有效 ~65TF）的锅不在 GEMM（它跑在峰值），而在 ①prefill attention
+内核（写一个 flash-prefill h128/gqa4/fp8KV 内核即可，decode 战役同款手术、材料全在）②CPU 侧步开销。
+GEMM 侧任何"换格式/换指令"的优化（int8/bf16 WMMA 之争）对 prefill **零收益**——它已在峰上。
