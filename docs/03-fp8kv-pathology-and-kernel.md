@@ -1,3 +1,8 @@
+---
+layout: default
+title: "03 · fp8 KV 病灶链与自写 decode 内核（成功案例）"
+---
+
 # 03 · fp8 KV 病灶链与自写 decode 内核（成功案例）
 
 2026-09-14 完成：为 vllm-radiance 写了 gfx1201 的 fp8-KV decode attention Triton 内核，

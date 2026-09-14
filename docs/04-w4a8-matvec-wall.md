@@ -1,3 +1,8 @@
+---
+layout: default
+title: "04 · W4A8 matvec：四面碰壁与结构性定罪（负结论）"
+---
+
 # 04 · W4A8 matvec：四面碰壁与结构性定罪（负结论）
 
 2026-09-14 的第二个内核项目，目标是闭合单路 decode 差距（vLLM 49.9 vs llama.cpp 68.4 t/s）。
