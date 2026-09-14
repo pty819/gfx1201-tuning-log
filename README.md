@@ -43,10 +43,11 @@
 | llama.cpp Vulkan + q8 KV | **68.4** | 125 | 136 | ~2.8k tok/s | 96k tokens |
 | vLLM bf16 KV | 49.4 | 139 | 210 | **~5.1k** tok/s | 33.8k |
 | vLLM fp8 KV（stock，病态） | 29.6 | — | — | ~4.6k | 67.7k |
-| **vLLM fp8 KV + 自写 kernel（现行）** | 49.9 | **148** | **223.4** | 4.4k tok/s | **80,960** |
+| vLLM fp8 KV + 自写 attention kernel | 49.9 | 148 | 223 | 4.4k tok/s | 80,960 |
+| **+ h4mv HIP W4 GEMM（现行）** | **80.1** | **199.9** | **223.9** | 4.4k tok/s | 80,960 |
 
-选型结论：**prefill 重的负载永远 vLLM；≤3 路 decode 用 llama.cpp（单路仍领先 37%）；≥4 路用 vLLM + 自写 fp8 KV 内核**。
-单路 decode 的剩余差距在 W4 GEMM matvec（llama.cpp 294 GB/s vs vLLM 侧 ~180-205 GB/s），Triton 语言层已证明闭合不了，唯 HIP/布局路线——见 [docs/04](docs/04-w4a8-matvec-wall.md)。
+选型结论（09-14 收官）：**vLLM + h4mv 在所有并发档全面领先**——单路 80.1 超 llama.cpp 达 17%，
+8 路聚合 224 持平最优；llama.cpp 退居"零依赖备份"角色。单路步长 20.04 → 12.48ms。
 
 ## 两次内核攻坚
 
@@ -82,6 +83,7 @@ docs/            六篇阶段详录（栈与量化 / llama.cpp / fp8KV 内核 / 
 vllm-fp8kv/      注意力内核全套：kernel v1/v3、注入 override、sitecustomize、最优 serve 脚本
 vllm-w4matvec/   Triton matvec 五版、op 级拦截 patch、二分阶梯、ISA 统计工具
 w4-hip-demo/     HIP demo 内核（v1/v2）、L2 轮转基准、32 位置探针——397-400 GB/s 的出处
+h4mv/           生产内核（V_DOT2_F32_BF16 + 模板 M）+ op 拦截集成 + 启动脚本——单路 80.1 的出处
 profiling/       EngineCore 进程内 profiler 钩子、微基准、两份实测 profile 输出
 bench/           通用并发基准（P/T 两相、ignore_eos）、真实翻译 md5 等价校验
 llamacpp/        llama.cpp 启动包装、Vulkan 值守/回切脚本、env wrapper

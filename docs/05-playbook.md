@@ -10,7 +10,7 @@ title: "05 · 运行手册与未竟之路"
 **常驻 = vLLM 最优配置**：`http://<host>:8080/v1`，双别名 `Hy-MT2-7B` + `hy-mt2-7b`。
 
 ```bash
-bash ~/fp8kv-dev/serve-fp8kv-best.sh   # = vllm-fp8kv/serve-fp8kv-best.sh
+bash ~/fp8kv-dev/serve-h4mv.sh          # = h4mv/serve-h4mv.sh（09-14 起含 h4mv HIP W4 GEMM）
 ```
 
 要点：`--attention-backend TRITON_ATTN --kv-cache-dtype fp8 --port 8080`，
@@ -35,7 +35,7 @@ pkill -f llama-[s]erver; podman rm -f hy-mt2-vllm; bash /tmp/vk_launch.sh 98304
 | 负载形态 | 选择 | 数字依据（4k ctx） |
 |---|---|---|
 | prefill 重（长文档进出） | vLLM | ~5.1k vs ~2.8k tok/s |
-| 1-3 路 decode | llama.cpp Vulkan | 单路 68.4 vs 49.9 t/s |
+| decode（任意并发） | **vLLM + h4mv** | 单路 80.1 / 4 路 199.9 / 8 路 223.9 全面领先（09-14 起） |
 | ≥4 路 decode | vLLM + fp8 KV kernel | 8 路 223.4 vs 136 t/s |
 | 要最大 KV 池 | llama.cpp 96k 或 vLLM fp8 81k | bf16 KV 只有 33.8k |
 | 重复结构文本（列表/代码/改写） | llama.cpp + ngram 投机 | 2.9×，无损 |
