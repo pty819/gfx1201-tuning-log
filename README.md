@@ -67,20 +67,21 @@ graph-safe：kernel 内 `tl.load` 标量，杜绝 host `float()` 同步）；par
 monkey-patch `TritonAttentionImpl.forward`（条件 max_query_len==1 且 FP8_PER_TENSOR 且 h128 走自研 kernel，否则回落 stock）。
 v1 注意力经 `torch.ops.vllm.unified_attention_with_output` custom op 动态调 `self.impl.forward`，类级 patch 有效且 decode 图回放照常工作。
 
-### 2. W4A8 matvec（负结论，`vllm-w4matvec/`）
+### 2. W4A8 matvec（Triton 负结论 → HIP demo 反杀）
 
-四版内核（tile → u32 位拼接 → 行流 → MMA）全部正确但 L2-轮转实测天花板 163-193 GB/s，与 fork 自带 GEMM 打平。
-二分阶梯（L0 纯加载 → L4 完整 kernel）把代价定位到 scale 应用（~30% 税），八个优化假设逐一排除；
-**ISA 实锤：vgpr 89 vs 60（+29 寄存器 → wave/CU 8→5，占空度 -38%）**——Triton 在"权重+scale 双加载流"下有结构性代码生成缺陷。
-决定性账本：即使 scale 免费（L3 速率），步长 16.8ms ≈ 60 t/s，仍追不上 llama.cpp 68.4——**数学上不可能，到此为止**。
-llama.cpp 的 294 GB/s 证明空间存在，钥匙在 HIP/显式布局协同设计。
+Triton 侧：四版内核（tile → u32 位拼接 → 行流 → MMA）全部正确但 L2-轮转实测天花板 163-193 GB/s，
+与 fork 自带 GEMM 打平；二分阶梯 + ISA 把根因钉到 vgpr 占空度（89 vs 60，-38%），语言层无解。
+**但墙只属于 Triton**：09-14 随后用 ~150 行 HIP demo 内核（warp-per-row + 256 项 LDS 字节-LUT +
+HMUL2 折 scale + dot2）实测 **397-400 GB/s 真实 DRAM**——超 llama.cpp 294 达 36%，按此速率单路
+可上 ~73 t/s。详见 [docs/06](docs/06-w4gemm-hip-roadmap.md)（demo 代码在 `w4-hip-demo/`）。
 
 ## 目录索引
 
 ```
-docs/            五篇阶段详录（栈与量化 / llama.cpp / fp8KV 内核 / W4 matvec / 手册）
+docs/            六篇阶段详录（栈与量化 / llama.cpp / fp8KV 内核 / W4 matvec / 手册 / HIP demo+路线图）
 vllm-fp8kv/      注意力内核全套：kernel v1/v3、注入 override、sitecustomize、最优 serve 脚本
-vllm-w4matvec/   matvec 五版、op 级拦截 patch、二分阶梯、ISA 统计工具
+vllm-w4matvec/   Triton matvec 五版、op 级拦截 patch、二分阶梯、ISA 统计工具
+w4-hip-demo/     HIP demo 内核（v1/v2）、L2 轮转基准、32 位置探针——397-400 GB/s 的出处
 profiling/       EngineCore 进程内 profiler 钩子、微基准、两份实测 profile 输出
 bench/           通用并发基准（P/T 两相、ignore_eos）、真实翻译 md5 等价校验
 llamacpp/        llama.cpp 启动包装、Vulkan 值守/回切脚本、env wrapper
@@ -97,7 +98,7 @@ llamacpp/        llama.cpp 启动包装、Vulkan 值守/回切脚本、env wrapp
 
 ## 未竟之路
 
-- **HIP 原生 W4 GEMM**（数周级）：唯一能闭合单路差距的路线，参考 `radiance_mxfp4_fp8.hip` + vLLM Marlin + r4d 现成的 `gemm_w4a16_nt_m64`。
+- **HIP W4 GEMM 生产化**（demo 已验证 397-400 GB/s；完整清单见 [docs/06](docs/06-w4gemm-hip-roadmap.md)）：fp8 激活输入、load-time repack、op 级集成（脚手架已验证）、引擎瘦身两件套。
 - **给 fork 作者提 issue** 要 head_dim=128/GQA=4 的 r4d 编译变体（入口命名机制天生支持多几何，对作者可能只是加一行编译目标）。
 - fp8 KV 的 per-token-head scale 模式、SWA/sinks/alibi、投机解码路径、head_dim≠128 的覆盖。
 - INT4-W4A16 普通 AWQ checkpoint 的原生加速：该 fork 无加载路径，捷径排序 = requant→MXFP4（零工作量）> Triton v1（几天）> HIP（数周）。

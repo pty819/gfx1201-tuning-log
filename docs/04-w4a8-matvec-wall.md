@@ -79,3 +79,7 @@ CustomOpDef 没有 `.fn` 属性、模块属性是定义对象本身（直接调 
 （编译图内 scheme.apply_weights / kernel 类的 apply_weights 都不被 Python 调用，**只有 op 级拦截有效**。）
 拦截本身成功（ENGAGED 日志确认），但净效果 47.2 < 49.9 t/s——matvec 不比被替换者快，回退。
 `FP8KV_W4MV=1` 可重启实验。
+
+---
+
+> **09-14 后记**：墙只属于 Triton。同日用 ~150 行 HIP demo 内核实测 **397-400 GB/s 真实 DRAM**（warp-per-row + LDS 字节-LUT + HMUL2 折 scale + dot2），超 llama.cpp 的 294。demo 代码与生产化路线见 [06 · W4 GEMM HIP demo](06-w4gemm-hip-roadmap.html)。论文级的教训：gfx1201 的 hipcc 默认编 wave32，`__shfl_xor(…,64)` 会静默丢一半部分和。

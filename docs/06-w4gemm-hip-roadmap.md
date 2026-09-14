@@ -1,0 +1,81 @@
+---
+layout: default
+title: "06 · W4 GEMM：HIP demo 实测 + 生产化路线图"
+---
+
+# 06 · W4 GEMM：HIP demo 实测与生产化路线图
+
+2026-09-14 spike 完成的 **demo 级 HIP W4 matvec**（`w4-hip-demo/`），把"Triton 数学上不可行"
+的墙直接翻过去了。本篇 = demo 结果 + "真要啃 W4 GEMM 到底要干啥"的完整清单。
+
+## Demo 成绩（gfx1201，L2 轮转法，模型真实形状）
+
+| 内核 | qkv (6144×4096) | gate_up (28672×4096) | down (4096×14336) | 正确性 |
+|---|---|---|---|---|
+| v1 逐元素位拼接→f32 fmaf | 213* | 237 | 218 | rel ~1e-7 |
+| **v2 LDS 字节LUT + HMUL2 + dot2** | (448*)* | **400** | **397** | rel ~1e-7，64 位置探针全对 |
+
+\* qkv 形状小（12.6MB/缓冲），VRAM 紧只转得起 4 缓冲=52MB，蹭了 64MB L2，数字虚高；gate_up/down 轮转集 248/118MB 是真实 DRAM 数字。
+
+对照锚点：Triton matvec 天花板 163-193 / fork M=1 GEMM 125-205 / **llama.cpp 294** / 理论峰 ~450。
+
+**结论：~150 行的 demo 内核以 397-400 GB/s 流权重，超 llama.cpp 36%、超 Triton 墙 ~2.1×。**
+按此速率回填步长账本：每层 GEMM 510µs → ~312µs，单路步长 ~13.7ms ≈ 73 t/s——**光 GEMM 一项
+即可越过 llama.cpp 的 68.4，还没算引擎瘦身（3.9ms 间隙 + 0.62ms 投机头）那另一半**。
+
+## 内核设计（两版共用的骨架）
+
+- **一个 wave 一行输出**：无 LDS 激活暂存、无 `__syncthreads` 热路径，wave 内 shfl 归约。
+- **布局红利**：一个 `uint4`（16B）= 32 个权重 = **恰好一个 e8m0 scale 组**——scale 流量只有权重的
+  1/16，且相邻 lane 读相邻 scale 字节（协同）。scale 需预转置成 `[N, K/32]`（产线 = load-time repack）。
+- v1：每 nibble 位拼接 e2m1→f32（指数折叠 scale：`E = e + d + 126`）+ fmaf；~230 VALU ops/16B → 213-237 GB/s（ALU-bound）。
+- v2（快 1.9×）：**256 项 LDS LUT 以权重字节为索引** → f16x2 对（零和次正规全部吃进表里，
+  运行时零特判）+ 一次 packed f16 乘折 scale（`2^d` 广播；零安全、e2m1×2^d 在 f16 精确）+
+  `__builtin_amdgcn_fdot2`（f16 乘积精确、f32 累加）；~75 VALU ops/16B → 存储带宽受限。
+
+## Demo 里踩的三个坑（产线项目的真实学费）
+
+1. **gfx1201 的 hipcc 默认编 wave32**（ISA 里 `.amdhsa_wavefront_size32`，`warpSize=32`）。
+   内核必须 wave-size 无关：lane 数学全用 `warpSize`，launcher 多开 block 让多余 wave 提前退出。
+   按 wave64 写死的 `__shfl_xor(…, 64)` 会静默丢一半部分和。
+2. **e2m1 的两个位级特例**（Triton 时期就踩过，HIP 又踩一遍）：零判据是 `(v & 7) == 0`
+   （`0b1000` 是 -0）；次正规（e=0,m=1）值 0.5 的尾数必须为 0。
+3. **W 与 X 的配对在翻译时最容易错**：组内第 j 个权重 u32（8 权重）必须配它自己的 8 个 x
+   （`xv[j]`），b 字节配 `xb[b]` 字对。两次 bug 都是这一层——用 32 位置单热探针
+   （`probe_w4hip.py`）十分钟钉死。
+
+## 真要啃 W4 GEMM：生产化清单（按依赖排序）
+
+**P1 内核生产化（3-5 天专注）**——把 demo 变成引擎能用的算子：
+- 激活输入改 **fp8 e4m3**（W4A8 真实路径，x 流量再减半；RDNA4 有硬件 cvt，逐对转 f16 后走 v2 同款 dot2）
+- per-tensor 激活 scale 折进 epilogue（数学等价，等价验证）
+- K 尾部处理（K%32≠0 的形状）、M≤8 小批量（每 lane 同 x 多行累加，权重只读一遍）
+- CUDA graph 兼容（纯 kernel launch 天然可捕获；host 侧不得有查询分支）
+- 数值边界：e8m0 的 d 超出 [-14,15] 时 clamp 或回退（真实校准分布远在界内，但要防御）
+
+**P2 load-time repack（1 天）**——checkpoint 加载时把 scale 转置成 `[N, K/32]`（连续协同），
+可选：W/scale 交错布局合成单流。llama.cpp 的 repack 同思路，我们已验证必要性（Triton 侧的教训）。
+
+**P3 集成（1-2 天）**——脚手架已验证过（`vllm-w4matvec/fp8kv_w4patch.py` 的 op 级拦截跑通过
+ENGAGED）：`torch.library.impl` 覆盖 fork 的 `radiance::mxfp4_linear`，M≤阈值 走自研、
+其余回落 fork 自带 GEMM（prefill/skinny M6-64 本来就有快车道，**不需要写通用 GEMM**）。
+生效验证：coverage counter + 启动日志。
+
+**P4 引擎瘦身（独立轨道，与内核并行）**——单路要兑现还必须吃掉 ~4.5ms/步非 GEMM 开销：
+int2 投机头（若确认无产出，关掉白赚 3%）+ 3.9ms 调度间隙解剖（async 输出处理、调度策略）。
+
+**P5 验证阶梯（贯穿）**：32 位置探针 → 全形状 rel<1e-5 → 真实权重 golden md5（bench_tr2）→
+进程内 profile（profhook 确认 GEMM 时间下降）→ bench1 全矩阵（1/4/8 路 × fp8 KV）。
+
+## 风险与未定项
+
+- 微基准 ≠ 引擎内：x 的 L2 命中模式、多 kernel 竞争、launch 开销都会打折；P3 后必须以 profhook 实测为准。
+- qkv 形状的真实 DRAM 数字待服务空窗期补测（需要 >96MB 轮转集，现役服务占着显存）。
+- fork 若发新版自带更快的 M=1 GEMM（或作者愿意给），先测再写。
+- fp8 激活的 e4m3×f16 dot2 精度：乘积仍精确（e4m3 ⊂ f16），累加 f32，预期无损，但要用真实权重 md5 验证。
+
+## 捷径提醒（动手前先过一遍性价比）
+
+1. 给 fork 作者提 issue 要改进 M=1 路径（零工作量，看运气）。
+2. 本 demo 已把最大不确定性（Triton 之外是否真有 294+）消灭——HIP 路线从"信念"变成"已测得 400"。
+3. 若只是要"这台机器单路最快"，llama.cpp 68.4 仍是零成本现役方案；HIP 项目是给 vLLM 栈追平反超用的。
