@@ -108,3 +108,26 @@ prefill 4379 tok/s 不变（M=2048 回落 fork）。单路步长 20.04 → 12.48
 
 **质量与稳定性**：h4mv 三轮真实翻译 md5 完全一致；fork 基线反而三轮两个 md5（自身含不确定性）。
 译文人工验收干净（术语准确、无退化）。回退验证：`FP8KV_HIPW4=0` 重启即回 49.7 t/s 基线。
+
+## 终局 perf 分解与降精度调研（09-14 深夜，80.1 t/s 配置）
+
+60 步 torch.profiler（`profiling/prof_h4mv.txt`）：步长 12.47ms，GPU-busy 12.07ms，**引擎胶水只剩 0.4ms**（旧 3.9ms 间隙已消失）。
+
+| 成分 | ms/步 | 占比 | 备注 |
+|---|---|---|---|
+| h4mv W4 GEMM（128 层） | 9.37 | 78% | **引擎内 384 GB/s** = 微基准全额兑现（450 峰值的 85%） |
+| 自研 attention（split+reduce） | 1.32 | 11% | 长上下文才放大 |
+| int2 draft/lm_head + topk 采样链 | 0.88 | 7% | lm_head=tied embedding（vocab 128167），fork 已量化 int2；采样融合可省 ~0.2ms |
+| KV 写 + norm + 量化 | ~0.4 | 3% | |
+| 胶水 | ~0.4 | 3% | |
+
+**没有浪费型瓶颈了**；内核打磨余量 ≤1ms。唯一数量级杠杆是权重位数。
+
+**降精度调研结论**（RDNA3/4 指令参考 + QuaRot/SpinQuant/QuIP# 文献）：
+- RDNA4 **无 fp8/fp4 标量 dot**——算力全在 WMMA（M≥16，prefill 已吃 325TF）；decode 物理够不着
+- VALU 有 `V_DOT4/8_I32_IU4`，但 int4 与 MXFP4 同为 4bit 带宽，decode 带宽受限 → **零收益**（e2m1 非整数网格本也用不了）
+- 激活降精度在 decode 无意义（M≤4 仅 32KB）；lm_head fork 已 int2
+- **有效路径只有权重 <4bit**：W3=-25% 字节 → 单路 ~+20%（~95 t/s），需旋转+GPTQ 级校准（AMD Quark 官方有 QuaRot 教程，R2/R3/R4 旋转）；W2=-50% → +45%（~115）但需 QuIP# E8 codebook、7B 质量有险。h4mv 改 int3 只是 LUT 换码表，骨架全复用
+- KV fp8→fp4+旋转：长上下文选项（16k+ 回本，池再 ×2）
+
+**决策（用户拍板）：W3 等降精度项目暂不开工**，当前 80.1 t/s 收官。

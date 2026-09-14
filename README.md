@@ -100,7 +100,7 @@ llamacpp/        llama.cpp 启动包装、Vulkan 值守/回切脚本、env wrapp
 
 ## 未竟之路
 
-- **HIP W4 GEMM 生产化**（demo 已验证 397-400 GB/s；完整清单见 [docs/06](docs/06-w4gemm-hip-roadmap.md)）：fp8 激活输入、load-time repack、op 级集成（脚手架已验证）、引擎瘦身两件套。
+- ~~HIP W4 GEMM 生产化~~ **已完成（80.1 t/s）**，过程与终局 perf 分解见 [docs/06](docs/06-w4gemm-hip-roadmap.md)。再上台阶的唯一杠杆是 W3/W2 权重（已评估，暂不开工）。
 - **给 fork 作者提 issue** 要 head_dim=128/GQA=4 的 r4d 编译变体（入口命名机制天生支持多几何，对作者可能只是加一行编译目标）。
 - fp8 KV 的 per-token-head scale 模式、SWA/sinks/alibi、投机解码路径、head_dim≠128 的覆盖。
 - INT4-W4A16 普通 AWQ checkpoint 的原生加速：该 fork 无加载路径，捷径排序 = requant→MXFP4（零工作量）> Triton v1（几天）> HIP（数周）。
