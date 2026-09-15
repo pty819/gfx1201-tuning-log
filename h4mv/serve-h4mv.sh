@@ -16,7 +16,7 @@ podman run -d --name hy-mt2-vllm \
   -e RADIANCE_MXFP4_W4A8=1 \
   -e RADIANCE_MXFP4_W4A8_MIN_M=0 \
   -e RADIANCE_MXFP4_DECODE_MAX_M=64 \
-  -v /home/liyifan/fp8kv-dev:/opt/fp8kv -e PYTHONPATH=/opt/fp8kv -e FP8KV_HIPW4=1 --network host \
+  -v /home/liyifan/fp8kv-dev:/opt/fp8kv -e PYTHONPATH=/opt/fp8kv -e FP8KV_HIPW4=1 -e FP8KV_PREFILL=1 --network host \
   docker.io/magiccodingman/vllm-radiance:latest \
   /models/hy-mt2-7b-awq2-mxfp4 \
   --served-model-name Hy-MT2-7B hy-mt2-7b --attention-backend TRITON_ATTN \

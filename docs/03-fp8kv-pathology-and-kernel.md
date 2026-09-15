@@ -1,8 +1,3 @@
----
-layout: default
-title: "03 · fp8 KV 病灶链与自写 decode 内核（成功案例）"
----
-
 # 03 · fp8 KV 病灶链与自写 decode 内核（成功案例）
 
 2026-09-14 完成：为 vllm-radiance 写了 gfx1201 的 fp8-KV decode attention Triton 内核，
@@ -70,3 +65,5 @@ flash-decode split-KV 两段式：
 60 步 GPU-busy 16.19ms 分解：GEMM ~82%、**自研 attention 0.57ms（3.5%，病灶彻底解决）**、
 fp8 激活量化 0.39ms、int2 投机头 0.62ms/步；墙钟 20.04 − GPU-busy ≈ 3.9ms 调度间隙。
 eager 29.5 vs graph 49.8 t/s——Python 派发 ~17ms/步被 CUDA graph 隐藏，这是"引擎胶水税"的实底。
+
+prefill 注意力的后续战役（tile、HIP 停手、e2e）见 {doc}`07-prefill` 与 {doc}`perf-log`。

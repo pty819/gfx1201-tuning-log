@@ -1,8 +1,3 @@
----
-layout: default
-title: "04 · W4A8 matvec：四面碰壁与结构性定罪（负结论）"
----
-
 # 04 · W4A8 matvec：四面碰壁与结构性定罪（负结论）
 
 2026-09-14 的第二个内核项目，目标是闭合单路 decode 差距（vLLM 49.9 vs llama.cpp 68.4 t/s）。
@@ -82,4 +77,4 @@ CustomOpDef 没有 `.fn` 属性、模块属性是定义对象本身（直接调 
 
 ---
 
-> **09-14 后记**：墙只属于 Triton。同日用 ~150 行 HIP demo 内核实测 **397-400 GB/s 真实 DRAM**（warp-per-row + LDS 字节-LUT + HMUL2 折 scale + dot2），超 llama.cpp 的 294。demo 代码与生产化路线见 [06 · W4 GEMM HIP demo](06-w4gemm-hip-roadmap.html)。论文级的教训：gfx1201 的 hipcc 默认编 wave32，`__shfl_xor(…,64)` 会静默丢一半部分和。
+> **09-14 后记**：墙只属于 Triton。同日用 ~150 行 HIP demo 内核实测 **397-400 GB/s 真实 DRAM**（warp-per-row + LDS 字节-LUT + HMUL2 折 scale + dot2），超 llama.cpp 的 294。demo 代码与生产化路线见 {doc}`06-w4gemm-hip-roadmap`。论文级的教训：gfx1201 的 hipcc 默认编 wave32，`__shfl_xor(…,64)` 会静默丢一半部分和。

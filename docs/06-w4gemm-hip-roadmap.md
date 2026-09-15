@@ -1,8 +1,3 @@
----
-layout: default
-title: "06 · W4 GEMM：HIP demo 实测 + 生产化路线图"
----
-
 # 06 · W4 GEMM：HIP demo 实测与生产化路线图
 
 > **2026-09-14 当晚生产化完成（P1-P3 + P5 全过）**：`h4mv/` 内核上线，单路 **80.1 t/s**。

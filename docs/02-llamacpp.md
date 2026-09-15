@@ -1,8 +1,3 @@
----
-layout: default
-title: "02 · llama.cpp 基线与调优"
----
-
 # 02 · llama.cpp 基线与调优
 
 llama.cpp 是这场战役的"对照组"，也是单路 decode 的标杆（68.4 t/s @ 4k ctx，至今未被 vLLM 侧追平）。
