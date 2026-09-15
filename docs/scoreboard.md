@@ -27,18 +27,19 @@
 
 32 层粗算：860 tok ≈ 4.5 ms/层，2050 tok ≈ 10.8 ms/层。墙钟含引擎调度，大于纯 kernel。
 
-## 注意力微基准（隔离 kernel，µs/layer）
+## 注意力微基准（µs/layer）
 
 Hy-MT2 几何：HQ=32 HKV=8 D=128 GQA=4 PBLK=16。
+**不要把 1525 和 1680 横比**：前者是引擎内 stock、850 tok；后者是隔离自写 kernel、2048 tok。
 
-| 内核 | 2048 first | 850 续写 ctx=2898 | 正确性 |
+| 内核 | 850 first | 2048 first | 850 续写 ctx=2898 |
 |---|---|---|---|
-| 引擎内 stock `unified_attention`（profiler） | 1525 | — | 生产旧路径 |
-| 自写 Triton v2 默认 128/128/8/2 | 3360 | 2975 | OK |
-| **现行 Triton v2.1 64/32/2/2** | **1680** | **1627** | max err 0.016–0.033 |
-| 手写 HIP WMMA v4 NW=8 | 2323 | 2376 | ALL OK；VGPR=167，SIMD 驻留 1 波 |
+| 引擎内 stock `unified_attention` | **1525**（profiler，48.8 ms/32 层） | 未做同口径隔离测；e2e 395 ms | — |
+| 自写 Triton v2 默认 128/128/8/2 | — | 3360 | 2975 |
+| **现行 Triton v2.1 64/32/2/2** | **405** | **1680** | 1627 |
+| 手写 HIP WMMA v4 NW=8 | — | 2323 | 2376 |
 
-手写 HIP 正确但打不过现行 Triton，已停。详见 {doc}`07-prefill`。
+850 上自写 kernel 约为 stock 的 1/3.8。2048 的对照看 e2e（395 → 345 ms），不是 1525 vs 1680。HIP 正确但 VGPR=167，已停。详见 {doc}`07-prefill`。
 
 ## Decode 质量门
 

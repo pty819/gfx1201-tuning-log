@@ -41,7 +41,7 @@
 : 引擎 profiler
 
 形状
-: 长 prefill chunk（`--max-num-batched-tokens 2048`）
+: 引擎内一次 prefill step。微基准脚本把同一 48.8 ms 标成 **stock@850 tok**（`prefill_test.py` 的 `stock 48.8`）。**不是 2048 tok。**
 
 方法
 : `profiling/fp8kv_profhook.py` / `prof_prefill.txt`，1 个 EngineCore step
@@ -53,7 +53,7 @@
 : `kernel_unified_attention.kd` **1525 µs/layer × 32 = 48.8 ms**，占该 step GPU 时间 56%
 
 备注
-: 这就是口头「stock 1525µs」的出处。它是 **vLLM 统一注意力**，不是后来隔离测的自写 Triton v2 默认 tile。GEMM（`radiance::mxfp4_linear`）已在 fp8 WMMA 峰值附近，~39% GPU。
+: 口头「stock 1525µs」= 这条。同长度隔离对照是 Triton v2.1 @850 = **405 µs**，不是 2048 的 1680 µs。GEMM ~39% GPU。
 
 ---
 
