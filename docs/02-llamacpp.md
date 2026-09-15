@@ -1,6 +1,7 @@
 # 02 · llama.cpp 基线与调优
 
-llama.cpp 是这场战役的"对照组"，也是单路 decode 的标杆（68.4 t/s @ 4k ctx，至今未被 vLLM 侧追平）。
+llama.cpp 是这场战役的对照组，也是 09-14 h4mv 落地前的单路 decode 标杆（68.4 t/s @ 4k ctx）。
+现行 vLLM + h4mv 是 **80.1 t/s**，已经反超；llama.cpp 现在的角色是零依赖备份 + 更大 KV 池（96k vs 81k）。
 
 ## 后端选择：Vulkan 为主
 
@@ -48,8 +49,8 @@ llama.cpp 是这场战役的"对照组"，也是单路 decode 的标杆（68.4 t
 
 ## 选型口径
 
-- ≤3 路 decode：本配置（单路 68 t/s 领先 vLLM 37%）
-- ≥4 路：换 vLLM（`llamacpp/switch_to_vllm.sh`）
-- prefill 重：永远 vLLM（~5.1k vs ~2.8k tok/s）
+09-14 h4mv 之前曾是「≤3 路 llama.cpp / ≥4 路 vLLM」。**现行（09-15）decode 任意并发都用 vLLM + h4mv**（1/4/8 路 80.1 / 199.9 / 223.9）。llama.cpp 只在需要更大 KV 池或零容器依赖时用。
+
+prefill 重：永远 vLLM（现行 e2e ~6k tok/s vs llama.cpp ~2.8k）。
 
 切换前必须 `pkill llama-server`，否则 VRAM 撞车 init fail。

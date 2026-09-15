@@ -21,7 +21,7 @@ podman logs hy-mt2-vllm 2>&1 | grep -E "KV cache size|128/128|fp8kv-prefill" | t
 # 以及 [fp8kv-prefill] installed / ENGAGED
 ```
 
-**备用 = llama.cpp Vulkan**（单路 decode 更快 / 池更大）：
+**备用 = llama.cpp Vulkan**（KV 池更大 96k vs 81k；单路 decode **不再**更快，68.4 vs 80.1）：
 
 ```bash
 pkill -f llama-[s]erver; podman rm -f hy-mt2-vllm; bash /tmp/vk_launch.sh 98304
@@ -48,11 +48,11 @@ GPU 功耗档锁 high；同口径对比（不同池深/测法的历史数字不�
 
 ## 复盘：这条路线图上每个岔口的判定
 
-1. **fp8 KV 病态** → 不是"fp8 在 AMD 上不行"，是 stock Triton 的 fp8→f32 慢转换；自写 kernel 后 fp8 是最优解。
-2. **单路差距** → 已钉死在 W4 matvec 带宽（llama.cpp 294 GB/s vs 双方 ~180-205）；Triton 写不出来（vgpr/占空度结构性缺陷 + L3 上限算账不过关），唯 HIP。
+1. **fp8 KV 病态（decode）** → 不是"fp8 在 AMD 上不行"，是 stock 的 fp8→f32 慢转换；自写 decode kernel 后 fp8 KV 可用。prefill 注意力慢是另一件事，见 {doc}`07-prefill`。
+2. **单路差距** → 09-14 上午钉在 W4 matvec 带宽；Triton 写不出来。当晚 h4mv HIP 落地后 **80.1 > llama.cpp 68.4**，这条差距已闭合。
 3. **投机解码** → ngram 对真实翻译零收益（2.9× 只存在于重复文本）。
-4. **多路扩展** → vLLM 每步边际成本 ~2.6ms/路 < llama.cpp ~5.8ms/路——高起步低边际 vs 低起步高边际，交叉点 3-4 路。
-5. **引擎胶水税** → eager 29.5 vs graph 49.8 t/s；墙钟-GPU busy ≈ 3.9ms 调度间隙。想再快要么更深地吃掉这 3.9ms，要么换调度器。
+4. **多路扩展** → 交叉点 3-4 路是 h4mv 之前的口径；现行 1 路已经用 vLLM。
+5. **引擎胶水税** → h4mv 之前墙钟−GPU busy ≈ 3.9ms（49.9 t/s 配置）。80.1 配置上同一 profiler 只剩 **0.4ms**。
 
 ## 未竟之路（按性价比排序）
 

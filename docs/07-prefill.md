@@ -6,13 +6,15 @@ decode 和 W4 GEMM 收官之后，长 prompt 的墙钟仍被 prefill 咬住。pr
 
 `r4d 0.5.0` 只编了 `attn_prefill/decode_h256_gqa6_{bf16kv,fp8kv}`。Hy-MT2 是 **h128 / GQA=4**，`r4d.select()` 返回空，从第一天起 prefill 就走上游 Triton。banner 上的 `RADIANCE_USE_R4D ON` 只管开关，不管几何。
 
-所以「手写 WMMA 打不过 r4d」不成立——这条路径上没有 r4d 注意力。对照物是 vLLM `unified_attention`。**1525 µs/layer 是 850 tok 的 stock 数**，同长度自写 Triton v2.1 是 405 µs；1680 µs 是 2048 tok，不能跟 1525 横比。
+所以「手写 WMMA 打不过 r4d」不成立——这条路径上没有 r4d 注意力。对照物是 vLLM `unified_attention`。
+profiler 里它是 **1525 µs/层**（48.8 ms / 32 次），但 dump 没有 qlen，不能和隔离测的 405（850 tok）或 1680（2048 tok）直接相除。
+留着自写 kernel 的依据是 **同方法 e2e**：~2050 tok 395 → 345 ms；~860 tok 150 → 143 ms。
 
 ## 自写 Triton v2 → v2.1
 
 `vllm-fp8kv/fp8kv_prefill.py`。v1 的教训已经写在文件头：`tl.dot` 会降成 gfx12 WMMA；慢在 `tl.trans(K)`、`tl.exp`、每块都套因果 mask、`num_stages>=3` spill。v2 去掉转置、改 `exp2`、全可见砖 / 斜砖两段循环、stages 锁 2。
 
-v2.1 没改算法，只改 launch 配置。隔离网格里旧默认 `BM=128 BN=128 warps=8 stages=2` 是最慢的之一（3360 µs @2048）。最快且 4-case 过关的是 **`64/32/2/2`（850 tok 405 µs / 2048 tok 1680 µs）**。相对 stock 850 tok 的 1525 µs，kernel 大约 3.8×；2048 看 e2e（395 → 345 ms）。
+v2.1 没改算法，只改 launch 配置。隔离网格里旧默认 `BM=128 BN=128 warps=8 stages=2` 是最慢的之一（3360 µs @2048）。最快且 4-case 过关的是 **`64/32/2/2`（隔离：850 tok 405 µs / 2048 tok 1680 µs）**。和生产 stock 的同方法对照看 e2e，不要用 1525÷405。
 
 挂进 serving：`PYTHONPATH=/opt/fp8kv` + `FP8KV_PREFILL=1`，`sitecustomize` import。monkey-patch `TritonAttentionImpl.forward`。vLLM 0.28 的 metadata **没有** `num_computed_tokens`，要用 `q0 = max_seq_len - qlen`。cascade / SWA / 多序列直接回落。成功时 EngineCore 打 `[fp8kv-prefill] ENGAGED qlen=… q0=…`。
 

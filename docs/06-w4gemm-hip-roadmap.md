@@ -76,7 +76,7 @@ int2 投机头（若确认无产出，关掉白赚 3%）+ 3.9ms 调度间隙解�
 
 1. 给 fork 作者提 issue 要改进 M=1 路径（零工作量，看运气）。
 2. 本 demo 已把最大不确定性（Triton 之外是否真有 294+）消灭——HIP 路线从"信念"变成"已测得 400"。
-3. 若只是要"这台机器单路最快"，llama.cpp 68.4 仍是零成本现役方案；HIP 项目是给 vLLM 栈追平反超用的。
+3. （写这段时）若只是要"这台机器单路最快"，llama.cpp 68.4 仍是零成本方案。**当晚 P1–P3 做完后作废**：h4mv 单路 80.1，已经反超。
 
 ## 生产化结果（2026-09-14 晚，P1-P3+P5 完成）
 
@@ -99,7 +99,8 @@ decode 图，M=1/2/4 档全部走 h4mv）。
 | 4 路 | 147.9 | **199.9** | +35% |
 | 8 路 | 223.4 | 223.9 | 持平（M=8 → fork skinny，设计使然） |
 
-prefill 4379 tok/s 不变（M=2048 回落 fork）。单路步长 20.04 → 12.48ms。
+当时 prefill 4379 tok/s（M=2048 GEMM 回落 fork，**尚未换 prefill 注意力**）。单路步长 20.04 → 12.48ms。
+09-15 prefill tile 之后的 e2e 见 {doc}`scoreboard`（~2050 tok / 345 ms / ~5940 tok/s）。
 
 **质量与稳定性**：h4mv 三轮真实翻译 md5 完全一致；fork 基线反而三轮两个 md5（自身含不确定性）。
 译文人工验收干净（术语准确、无退化）。回退验证：`FP8KV_HIPW4=0` 重启即回 49.7 t/s 基线。
@@ -131,17 +132,16 @@ prefill 4379 tok/s 不变（M=2048 回落 fork）。单路步长 20.04 → 12.48
 
 用 uptime/慢步触发的 prefill 专用 profiler（`fp8kv_prof_prefill.py`，v4：该引擎空闲时**不 tick step**，
 启动热身/捕获全绕过 step() 直接调模型——所以钩子装好后第一个 >0.2s 的步必是真实请求的 prefill chunk，
-无需任何武装）。抓到的 chunk（~850 token，带 profiler CPU 开销墙 666ms）：
+无需任何武装）。`prof_prefill.txt` **没有写入该步的 qlen**。能确定的是：
 
-| GPU 项 | 时间 | 占 GPU | 判读 |
+| GPU 项 | 时间 | 占该表 GPU | 判读 |
 |---|---|---|---|
-| **stock Triton unified prefill attention**（32 层 × **1.53ms/层**） | 48.8ms | **56%** | **距带宽/算力下限几十倍——真凶**；decode 战役只写了 decode kernel，prefill 走的一直是 stock 路径 |
-| fork W4A8 GEMM（128 个 `radiance_mxfp4_fp8_gemm_folded`） | 34.3ms | 39% | 折算 **~346 TFLOPS ≈ fp8 WMMA 峰值（325）——GEMM 无辜且优秀** |
-| fp8 激活量化 + silu/norm/KV写/采样 | ~4.5ms | 5% | 边角料 |
+| stock `kernel_unified_attention.kd`（32 次，**1525 µs/次**） | 48.8ms | **56%** | prefill 注意力是这一步的 GPU 大头；decode 战役没动这条路径 |
+| fork W4A8 GEMM（128 个 `radiance_mxfp4_fp8_gemm_folded`） | 34.3ms | 39% | 已在 fp8 WMMA 量级，不是这条 prefill 的主因 |
+| fp8 量化 + silu/norm/KV 写 | ~4.5ms | 5% | 边角料 |
 
-另一维度：chunk 墙钟与 GPU busy 差约一半（无 profiler 时 ~468ms 墙 vs ~250ms GPU）——**CPU/引擎侧
-（调度、launch 间隙、单次 89ms 的 hipDeviceSynchronize）吃掉了另一半**。
+该 dump 的墙钟 666ms 含 profiler；`hipDeviceSynchronize` 一项就是 89ms CPU，**不能**当成无 profiler 的服务墙钟。
+无 profiler 的同口径 e2e 见 {doc}`perf-log`（stock ~860 tok ≈ 150ms，不是 468ms）。
 
-**修正结论**：prefill 4379 tok/s（有效 ~65TF）的锅不在 GEMM（它跑在峰值），而在 ①prefill attention
-内核（写一个 flash-prefill h128/gqa4/fp8KV 内核即可，decode 战役同款手术、材料全在）②CPU 侧步开销。
-GEMM 侧任何"换格式/换指令"的优化（int8/bf16 WMMA 之争）对 prefill **零收益**——它已在峰上。
+**当时的结论**（kernel 还没换）：prefill 4379 tok/s 的锅不在 GEMM，而在 stock 注意力 + CPU 间隙。
+flash-prefill 内核 09-15 已上线，见 {doc}`07-prefill`。GEMM 换格式对 prefill 仍然没必要。

@@ -41,19 +41,19 @@
 : 引擎 profiler
 
 形状
-: 引擎内一次 prefill step。微基准脚本把同一 48.8 ms 标成 **stock@850 tok**（`prefill_test.py` 的 `stock 48.8`）。**不是 2048 tok。**
+: 引擎内一次 prefill step。`prof_prefill.txt` **未写 qlen**。`prefill_test.py` 里的 `stock 48.8` 是写死的注释，不是这次测出来的。
 
 方法
-: `profiling/fp8kv_profhook.py` / `prof_prefill.txt`，1 个 EngineCore step
+: `profiling/fp8kv_prof_prefill.py` / `prof_prefill.txt`，1 个 EngineCore step（含 profiler 税，墙钟 666ms）
 
 改动
 : 无（当时 `FP8KV_PREFILL` 未开）
 
 数字
-: `kernel_unified_attention.kd` **1525 µs/layer × 32 = 48.8 ms**，占该 step GPU 时间 56%
+: `kernel_unified_attention.kd` **1525 µs/layer × 32 = 48.8 ms**，占该表 GPU 56%；GEMM 34.3 ms（39%）
 
 备注
-: 口头「stock 1525µs」= 这条。同长度隔离对照是 Triton v2.1 @850 = **405 µs**，不是 2048 的 1680 µs。GEMM ~39% GPU。
+: 口头「stock 1525µs」= 这条 kernel 时间。不能当成 850 tok 或 2048 tok 的隔离基准。无 profiler 的服务墙钟用 e2e 条（~860 tok stock ≈ 150 ms）。
 
 ---
 
